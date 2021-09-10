@@ -512,6 +512,12 @@ public final class ConfigurationResolver {
       throw new TransitionException("Errors encountered while applying Starlark transition");
     }
     result = StarlarkTransition.validate(transition, buildSettingPackages, result);
+    // Starlark build settings set to default values explicitly on the command line are not included
+    // in build options, but StarlarkTransition.addDefaultStarlarkOption might have added some so
+    // that the transition can read its inputs. Trim all these explicitly set defaults here to
+    // prevent action conflicts.
+    result = StarlarkTransition
+        .trimDefaultStarlarkOptions(result, transition, buildSettingPackages);
     // If the transition errored (like bad Starlark code), this method already exited with an
     // exception so the results won't go into the cache. We still want to collect non-error events
     // like print() output.

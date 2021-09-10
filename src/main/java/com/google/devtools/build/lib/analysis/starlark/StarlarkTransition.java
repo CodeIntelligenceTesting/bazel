@@ -47,6 +47,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -443,6 +444,48 @@ public abstract class StarlarkTransition implements ConfigurationTransition {
       }
     }
     return optionsWithDefaults == null ? fromOptions : optionsWithDefaults.build();
+  }
+
+  /*
+   * Removes all build settings explicitly set to their default values from the output build options
+   * of a transition. This cancels the effect of addDefaultStarlarkOptions post-transition if called
+   * with the same {@code buildSettingPackages} and thus restores the invariant that default-valued
+   * Starlark build settings are not stored in {@code BuildOptions}.
+   */
+  public static Map<String, BuildOptions> trimDefaultStarlarkOptions(
+      Map<String, BuildOptions> toOptions,
+      ConfigurationTransition transition,
+      Map<PackageValue.Key, PackageValue> buildSettingPackages)
+      throws TransitionException {
+    if (buildSettingPackages.isEmpty()) {
+      return toOptions;
+    }
+    ImmutableMap<Label, Object> buildSettingDefaults =
+        getDefaultValues(buildSettingPackages, transition);
+    ImmutableMap.Builder<String, BuildOptions> toOptionsBuilder = ImmutableMap
+        .builderWithExpectedSize(toOptions.size());
+    for (Entry<String, BuildOptions> entry : toOptions.entrySet()) {
+      BuildOptions options = entry.getValue();
+      BuildOptions.Builder optionsWithoutDefaults = null;
+      for (Map.Entry<Label, Object> buildSettingDefault : buildSettingDefaults.entrySet()) {
+        Label buildSetting = buildSettingDefault.getKey();
+        if (!options.getStarlarkOptions().containsKey(buildSetting)) {
+          continue;
+        }
+        Object value = options.getStarlarkOptions().get(buildSetting);
+        Object defaultValue = buildSettingDefault.getValue();
+        if ((value == null && defaultValue == null) ||
+            (value != null && value.equals(defaultValue))) {
+          if (optionsWithoutDefaults == null) {
+            optionsWithoutDefaults = options.toBuilder();
+          }
+          optionsWithoutDefaults.removeStarlarkOption(buildSetting);
+        }
+      }
+      toOptionsBuilder.put(entry.getKey(),
+          optionsWithoutDefaults == null ? entry.getValue() : optionsWithoutDefaults.build());
+    }
+    return toOptionsBuilder.build();
   }
 
   /**
